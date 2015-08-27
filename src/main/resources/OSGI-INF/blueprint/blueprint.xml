@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<blueprint xmlns="http://www.osgi.org/xmlns/blueprint/v1.0.0"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+       http://www.osgi.org/xmlns/blueprint/v1.0.0 http://www.osgi.org/xmlns/blueprint/v1.0.0/blueprint.xsd
+       http://camel.apache.org/schema/blueprint http://camel.apache.org/schema/blueprint/camel-blueprint.xsd">
+
+
+
+  
+    <!-- Imported OSGi services include the Transaction manager and JDBC DataSource -->
+ 
+    <reference id="mysql-db" interface="javax.sql.DataSource" availability="mandatory" filter="(datasource.name=SQL_Src)"/> 
+    <reference id="BSM-db" interface="javax.sql.DataSource" availability="mandatory" filter="(datasource.name=SQL_Tgt)"/>   
+ 
+
+<!--*************** this is the JDBC data sources for development test ******************************************************-->
+  <!-- 
+<bean id="mysql-db" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+  <property name="driverClassName" value="com.microsoft.sqlserver.jdbc.SQLServerDriver"/>
+  <property name="url" value="jdbc:sqlserver://10.10.110.103\dev;databaseName=JMMAPECStaging"/>
+  <property name="username" value="devsa"/>
+  <property name="password" value="Magma1"/>
+</bean>
+
+<bean id="BSM-db" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+  <property name="driverClassName" value="com.microsoft.sqlserver.jdbc.SQLServerDriver"/>
+  <property name="url" value="jdbc:sqlserver://10.10.110.103\dev;databaseName=BSM_JMM"/>
+  <property name="username" value="devsa"/>
+  <property name="password" value="Magma1"/>
+</bean>
+	 -->
+<!--*************** this is the JDBC data source for development test *******************************************************-->
+
+  
+<!-- configure the Camel SQL component to use the JDBC data source -->
+<bean id="sqlSrc" class="org.apache.camel.component.sql.SqlComponent">
+  <property name="dataSource" ref="mysql-db"/>
+</bean>
+
+<bean id="sqlTgt" class="org.apache.camel.component.sql.SqlComponent">
+  <property name="dataSource" ref="BSM-db"/>
+</bean>
+
+
+<bean id="dataProcessor" class="bsm.prototype.database.latlon.DataProcessor"/>
+
+
+  <camelContext xmlns="http://camel.apache.org/schema/blueprint">
+  <route id="JMMDataToBSM">
+    <from uri="timer:dbPool"/>
+    <to uri="sqlSrc:SELECT * FROM tblLoad_Staging" id="selectRecordsFromSrc"/>
+    <split id="splitIntoRecords">
+      <simple>${body}</simple>
+      <bean ref="dataProcessor" method="setBodyToPayload"/>
+      <choice id="selectMsgType">
+        <when>
+          <simple>${property[MsgType]} == "Deliveries"</simple>
+          <log message="${property[MsgType]}" loggingLevel="INFO"/>
+          <unmarshal>
+            <jaxb contextPath="generated" prettyPrint="true"/>
+          </unmarshal>
+          <transform>
+            <method ref="dataProcessor" method="mapToDeliveriesTgt"></method>
+          </transform>
+          <to uri="sqlTgt:INSERT INTO Delivery (endDate,endHeight,endTemp,endVolume,endWater,gallons,inches,siteId,startDate,startHeight,startTemp,startVolume,startWater,tankNumber) VALUES(:#endDate, :#endHeight, :#endTemp, :#endVolume, :#endWater, :#gallons, :#inches, :#siteId, :#startDate, :#startHeight, :#startTemp, :#startVolume, :#startWater, :#tankNumber)" id="insertIntoDeliveryTbl"/>
+        </when>
+        <when>
+          <simple>${property[MsgType]} == "Inventory"</simple>
+          <log message="${property[MsgType]}" loggingLevel="INFO"/>
+          <unmarshal>
+            <jaxb contextPath="generated" prettyPrint="true"/>
+          </unmarshal>
+          <transform>
+            <method ref="dataProcessor" method="mapToDeliveriesTgt"></method>
+          </transform>
+          <to uri="sqlTgt:INSERT INTO InventoryLevel (capacity,height,productCode,siteId,tankNumber,tankStatus,tcVolume,temperature,timeStamp,ullage,volume,waterLevel) VALUES(:#capacity,height,:#productCode,:#siteId,:#tankNumber,:#tankStatus,:#tcVolume,:#temperature,:#timeStamp,:#ullage,:#volume,:#waterLevel)" id="InsertIntoInventoryTbl"/>
+        </when>
+        <otherwise>
+          <log message="Facility Msg" loggingLevel="WARN"/>
+        </otherwise>
+      </choice>
+    </split>
+  </route>
+</camelContext>
+
+</blueprint>
